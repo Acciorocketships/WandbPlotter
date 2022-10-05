@@ -2,7 +2,6 @@ import wandb
 import pandas as pd
 from typing import List, Dict, Callable, Any, Optional
 from matplotlib import pyplot, cycler
-import tikzplotlib
 
 
 class Plotter:
@@ -185,32 +184,8 @@ class Plotter:
 		if matplotlibsave:
 			pyplot.savefig(f"{path}.pdf", bbox_inches="tight", pad_inches=0)
 		if tikzsave:
+			import tikzplotlib
 			tikzplotlib.save(f"{path}.tex", textsize=9)
 		if show:
 			pyplot.show()
 
-
-
-
-def example1():
-	plotter = Plotter(project="sae-rand-exp")
-	runs = plotter.group_runs(
-			name_func = lambda config: "{group}-{dim}".format(group=config["group"], dim=config["hidden_dim"]),
-			filter_config = {"group": lambda group: group=="sae" or group=="transformer"}
-		) # a dict of key: groupname to val: list of run objects
-	groups = plotter.get_data(runs, attr="corr", samples=500) # dict of key: groupname to val: pandas df (index: step, columns: run names)
-	bounds = plotter.get_bounds(groups, minmax=True) # transformed dict, where the dataframes now have columns "low" "mean" "high"
-	smoothed = plotter.smooth_data(bounds, smoothing=0.1) # transformed dict, applying some smoothing alpha
-	ax = plotter.plot(smoothed) # a matplotlib axes object with a minimalistic plot of the given data
-	pyplot.legend()
-	pyplot.show()
-	breakpoint()
-
-
-def example2():
-	plotter = Plotter(project="sae-rand-exp")
-	plotter.plot_full(attr="corr", smoothing=0.1, ylabel="Correlation", filter_config={"hidden_dim": 96})
-
-
-if __name__ == '__main__':
-	example2()

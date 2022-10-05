@@ -1,4 +1,5 @@
 from wandb_plotter import Plotter
+from matplotlib import pyplot
 
 plotter = Plotter(project="sae-rand-exp")
 runs = plotter.group_runs(
