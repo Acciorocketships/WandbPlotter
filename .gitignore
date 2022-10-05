@@ -1,0 +1,11 @@
+3rdparty/
+__MACOSX/
+__pycache__/
+.DS_Store
+runs/
+*/wandb
+run/fusion/wandb/
+run/rand/wandb/
+.idea/
+params/
+*.egg-info
