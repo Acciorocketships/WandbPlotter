@@ -110,7 +110,7 @@ class Plotter:
 				df = df.set_index(df[xattr].rename(xattr_new)).drop(xattr, axis=1)
 				df = df.rename(columns={attr: run.name})
 				dflist.append(df)
-			cat_nan = pd.concat(dflist, sort=True, axis=1)
+			cat_nan = pd.concat(dflist, sort=True, axis=1).astype(float)
 			groups[name] = self.interpolate_data(cat_nan)
 		return groups
 
