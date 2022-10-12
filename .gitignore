@@ -9,3 +9,4 @@ run/rand/wandb/
 .idea/
 params/
 *.egg-info
+*.pdf

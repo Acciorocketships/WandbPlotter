@@ -1,12 +1,13 @@
 import wandb
+import re
 import pandas as pd
-from typing import List, Dict, Callable, Any, Optional
+from typing import List, Dict, Callable, Any, Optional, Union
 from matplotlib import pyplot, cycler
 
 
 class Plotter:
 
-	def __init__(self, project, user="prorok-lab"):
+	def __init__(self, project, user):
 		self.project = project
 		self.user = user
 		self.api = wandb.Api(timeout=20)
@@ -24,7 +25,7 @@ class Plotter:
 			"axes.labelsize": 16,
 			"font.size": 25,
 			# Make the legend/label fonts a little smaller
-			"legend.fontsize": 16,
+			"legend.fontsize": 12,
 			"legend.title_fontsize": 7,
 			"legend.framealpha": 0.3,
 			"xtick.labelsize": 16,
@@ -33,7 +34,7 @@ class Plotter:
 			"figure.figsize": (10, 5),
 			# Colour Cycle
 			"axes.prop_cycle": cycler(color=["#377eb8","#ff7f00","#4daf4a","#f781bf","#a65628",
-									  		 "#984ea3","#2bcccc","#999999","#e41a1c","#dede00"])
+											 "#984ea3","#2bcccc","#999999","#e41a1c","#dede00"])
 
 		}
 		pyplot.rcParams.update(tex_fonts)
@@ -92,17 +93,21 @@ class Plotter:
 		return groups
 
 
-	def get_data(self, runs:Dict, attr:str, samples=500):
+	def get_data(self, runs:Dict, attr:str, xattr:str="_step", samples=10000):
 		# runs: a dict of key: groupname to val: list of run objects (the output of group_runs)
 		# attr: the metric to be fetched
 		groups = {}
 		for name, runlist in runs.items():
 			dflist = []
 			for run in runlist:
-				df = run.history(samples=samples, keys=[attr], x_axis="_step", pandas=True)
+				df = run.history(samples=samples, keys=[attr], x_axis=xattr, pandas=True)
 				if len(df) == 0:
 					continue
-				df = df.set_index(df["_step"].rename("step")).drop("_step", axis=1)
+				if xattr[0] == "_":
+					xattr_new = xattr[1:]
+				else:
+					xattr_new = xattr
+				df = df.set_index(df[xattr].rename(xattr_new)).drop(xattr, axis=1)
 				df = df.rename(columns={attr: run.name})
 				dflist.append(df)
 			cat_nan = pd.concat(dflist, sort=True, axis=1)
@@ -136,13 +141,44 @@ class Plotter:
 		return bounds
 
 
-	def plot(self, groups, custom_colour={}):
+	def plot(self, groups, custom_colour={}, custom_line={}, sort="val"):
+		# sort is one of "str" (alphabetical), "val" (ranks based on attr), or list of group names in order
+		if sort == "str":
+			def natural_keys(text):
+				def atoi(text):
+					return int(text) if text.isdigit() else text
+				return [atoi(c) for c in re.split(r'(\d+)', text)]
+			keys = sorted(groups.keys(), key=natural_keys)
+		elif sort == "val" or sort == "invval":
+			vals = {key: df.mean(axis=1).iloc[-1] for (key, df) in groups.items()}
+			last_val = lambda groupname: vals.get(groupname, 0)
+			keys = sorted(groups.keys(), key=last_val)
+			if sort == "val":
+				keys.reverse()
+		else:
+			keys = sort
 		fig, ax = pyplot.subplots()
-		for name, data in groups.items():
+		minx = float('inf')
+		maxx = -float('inf')
+		for name in keys:
+			data = groups[name]
 			if not (("mean" in data.columns) and ("low" in data.columns) and ("high" in data.columns)):
 				data = self.get_bounds(data)
-			(mean_line,) = ax.plot(data["mean"], label=name, color=custom_colour.get(name, None))
+			colour = None
+			for key, c in custom_colour.items():
+				if key in name:
+					colour = c
+					break
+			linestyle = "-"
+			for key, l in custom_line.items():
+				if key in name:
+					linestyle = l
+					break
+			(mean_line,) = ax.plot(data["mean"], label=name, color=colour, linestyle=linestyle)
 			ax.fill_between(data.index, data["low"], data["high"], color=mean_line.get_color(), alpha=0.3)
+			minx = min(minx, min(data.index))
+			maxx = max(maxx, max(data.index))
+		ax.set_xlim(left=minx, right=maxx)
 		return ax
 
 
@@ -151,13 +187,18 @@ class Plotter:
 				  name_func:Callable[[Dict[str, Any]], str] = lambda config: config["group"],
 				  filter_config:Dict[str, Any] = {},
 				  custom_colour:Dict = {},
+				  custom_line:Dict = {},
 				  samples:int = 1000,
+				  sort:Union[str, List[str]] = "val",
+				  log:bool = False,
 				  smoothing:float = 0,
 				  minmax:bool = False,
 				  xlabel:Optional[str] = "Step",
 				  ylabel:Optional[str] = "Reward",
 				  title:Optional[str] = None,
+				  ylim:Optional[List[float]]=None,
 				  legend:Optional[str] = "best",
+				  legend_ncol:int = 1,
 				  show:bool = True,
 				  tikzsave:bool = False,
 				  matplotlibsave:bool = True,
@@ -167,22 +208,26 @@ class Plotter:
 		group_data = self.get_data(group_runs, attr=attr, samples=samples) # dict of key: groupname to val: pandas df (index: step, columns: run names)
 		group_bounds = self.get_bounds(group_data, minmax=minmax) # transformed dict, where the dataframes now have columns "low" "mean" "high"
 		group_smoothed = self.smooth_data(group_bounds, smoothing=smoothing) # transformed dict, applying some smoothing alpha
-		ax = self.plot(group_smoothed, custom_colour=custom_colour)
+		ax = self.plot(group_smoothed, custom_colour=custom_colour, custom_line=custom_line, sort=sort)
 		if legend is not None:
-			pyplot.legend(loc=legend)
+			pyplot.legend(loc=legend, ncol=legend_ncol)
 		if xlabel is not None:
 			pyplot.xlabel(xlabel)
 		if ylabel is not None:
 			pyplot.ylabel(ylabel)
 		if title is not None:
 			pyplot.title(title)
+		if log:
+			pyplot.yscale("log")
+		if ylim is not None:
+			pyplot.ylim(bottom=ylim[0], top=ylim[1])
 		pyplot.grid()
 		if len(savename) > 0:
 			path = f"{self.project}-{attr}-{savename}"
 		else:
 			path = f"{self.project}-{attr}"
 		if matplotlibsave:
-			pyplot.savefig(f"{path}.pdf", bbox_inches="tight", pad_inches=0)
+			pyplot.savefig(f"{path}.pdf", bbox_inches="tight", pad_inches=0.1)
 		if tikzsave:
 			import tikzplotlib
 			tikzplotlib.save(f"{path}.tex", textsize=9)
